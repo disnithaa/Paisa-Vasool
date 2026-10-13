@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
 
 import com.paisavasool.app.domain.group.Group;
+import com.paisavasool.app.domain.money.MoneyAmount;
 import com.paisavasool.app.domain.user.User;
 
 import jakarta.persistence.Column;
@@ -71,7 +72,7 @@ public class Purchase {
             throw new IllegalArgumentException("title must not be blank");
         }
         this.title = title.trim();
-        this.estimatedAmount = requireValidAmount(estimatedAmount);
+        this.estimatedAmount = MoneyAmount.requirePositiveInr(estimatedAmount, "estimatedAmount");
         this.status = PurchaseStatus.DRAFT;
     }
 
@@ -89,17 +90,6 @@ public class Purchase {
             case APPROVED -> next == PurchaseStatus.COMPLETED || next == PurchaseStatus.CANCELLED;
             case CANCELLED, COMPLETED -> false;
         };
-    }
-
-    private static BigDecimal requireValidAmount(BigDecimal amount) {
-        if (amount == null || amount.signum() <= 0) {
-            throw new IllegalArgumentException("estimatedAmount must be positive");
-        }
-        int integerDigits = amount.precision() - amount.scale();
-        if (amount.scale() > 2 || integerDigits > 10) {
-            throw new IllegalArgumentException("estimatedAmount must fit NUMERIC(12, 2)");
-        }
-        return amount;
     }
 
     private static <T> T requireValue(T value, String fieldName) {

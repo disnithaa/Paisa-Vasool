@@ -89,6 +89,12 @@ public class GroupMembership {
         return joinedAt;
     }
 
+    public void leave() {
+        if (status == MembershipStatus.ACTIVE) {
+            status = MembershipStatus.LEFT;
+        }
+    }
+
     private static <T> T requireValue(T value, String fieldName) {
         if (value == null) {
             throw new IllegalArgumentException(fieldName + " must not be null");

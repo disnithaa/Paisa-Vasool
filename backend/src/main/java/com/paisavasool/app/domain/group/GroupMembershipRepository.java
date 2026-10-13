@@ -2,6 +2,7 @@ package com.paisavasool.app.domain.group;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Collection;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -17,4 +18,7 @@ public interface GroupMembershipRepository extends JpaRepository<GroupMembership
 
     @EntityGraph(attributePaths = "user")
     List<GroupMembership> findAllByGroup_IdOrderByJoinedAtAsc(UUID groupId);
+
+    @EntityGraph(attributePaths = "user")
+    List<GroupMembership> findAllByIdInAndGroup_Id(Collection<UUID> ids, UUID groupId);
 }

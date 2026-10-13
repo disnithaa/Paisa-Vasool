@@ -9,6 +9,12 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -29,9 +35,37 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/health", "/actuator/health").permitAll()
-                .anyRequest().permitAll());
+                .anyRequest().authenticated())
+            .httpBasic(Customizer.withDefaults());
 
         return http.build();
+    }
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    UserDetailsService userDetailsService(
+        PasswordEncoder passwordEncoder,
+        @Value("${app.dev-auth.enabled:false}") boolean devAuthEnabled,
+        @Value("${app.dev-auth.email:dev@paisavasool.local}") String devEmail,
+        @Value("${app.dev-auth.password:dev-only-change-me}") String devPassword
+    ) {
+        if (devAuthEnabled && (devPassword.isBlank() || "dev-only-change-me".equals(devPassword))) {
+            throw new IllegalStateException("Set DEV_AUTH_PASSWORD to a non-placeholder local password");
+        }
+        String encodedPassword = passwordEncoder.encode(devPassword);
+        return username -> {
+            if (devAuthEnabled && devEmail.equalsIgnoreCase(username)) {
+                return User.withUsername(devEmail)
+                    .password(encodedPassword)
+                    .roles("DEV")
+                    .build();
+            }
+            throw new UsernameNotFoundException("No configured development user");
+        };
     }
 
     @Bean

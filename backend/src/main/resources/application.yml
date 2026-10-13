@@ -7,10 +7,12 @@ spring:
     password: ${DB_PASSWORD:paisa123}
     driver-class-name: org.postgresql.Driver
   jpa:
+    open-in-view: false
     hibernate:
       ddl-auto: validate
     properties:
       hibernate:
+        default_schema: app
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
   flyway:
@@ -31,6 +33,11 @@ management:
       show-details: never
 
 app:
+  dev-auth:
+    enabled: ${DEV_AUTH_ENABLED:false}
+    email: ${DEV_AUTH_EMAIL:dev@paisavasool.local}
+    name: ${DEV_AUTH_NAME:Local Developer}
+    password: ${DEV_AUTH_PASSWORD:dev-only-change-me}
   cors:
     allowed-origins:
       - http://localhost:5173

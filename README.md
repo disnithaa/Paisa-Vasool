@@ -4,7 +4,7 @@ Paisa Vasool is a group spending and savings application. Its initial product jo
 
 ## Implemented scope
 
-The foundation includes a React + TypeScript + Vite frontend, a Java 21 / Spring Boot REST API, PostgreSQL in Docker Compose, Flyway migrations, and a database-backed health check. The backend supports users, groups, memberships, purchase estimates, and an internal expense ledger with allocations, derived balances, and simulated settlements. Purchases remain estimates; only a separately recorded expense changes the ledger. No real payments are executed.
+The foundation includes a React + TypeScript + Vite frontend, a Java 21 / Spring Boot REST API, PostgreSQL in Docker Compose, Flyway migrations, and a database-backed health check. The backend supports users, groups, memberships, a fictional offer catalog, purchase proposals and approvals, and an internal expense ledger with allocations, derived balances, and simulated settlements. A purchase proposal or simulated completion does not create a ledger expense; only a separately recorded expense changes balances. No real payments are executed.
 
 ## Prerequisites
 
@@ -133,6 +133,43 @@ Health endpoints:
 - `GET http://localhost:8080/api/health` checks the API and runs `SELECT 1` against PostgreSQL. It returns HTTP 200 when both are available and HTTP 503 when the database check fails.
 - `GET http://localhost:8080/actuator/health` is Spring Boot's health endpoint.
 
+## Offer catalog and purchase workflow
+
+The global catalog is seeded with two fictional offers by Flyway V4. Both are marked as sample data and their terms state that they have no real-world value. There is intentionally no offer-write endpoint yet: the current application has no catalog-admin authorization model, so allowing every group member to edit shared offers would be unsafe. Gift cards are deferred; stored gift-card value is not a discount and must not be counted as savings.
+
+All offer and purchase workflow operations are authenticated and group-scoped; the caller must be an active member of the specified group. The current policy treats active `OWNER` and `MEMBER` memberships alike for these actions. It does not implement owner-only approval or prevent the purchase creator from approving.
+
+Offer and eligibility endpoints:
+
+- `GET /api/groups/{groupId}/offers` — browse active offers within their validity window.
+- `GET /api/groups/{groupId}/offers/{offerId}` — retrieve offer details and terms.
+- `GET /api/groups/{groupId}/purchases/{purchaseId}/eligible-offers` — evaluate the draft purchase amount against active catalog entries and return each evaluation with either its calculated price or a rejection reason.
+
+Offers are either `PERCENTAGE_DISCOUNT` or `FIXED_DISCOUNT`; the two value fields are distinct, not interchangeable. Percentage discounts are greater than zero and at most 100%. Minimum spend and fixed discounts are INR `BigDecimal` values with two decimal places; percentage offers may define a maximum discount. Validity starts inclusively at `validFrom` and ends exclusively at `validUntil`. The pricing component rounds percentage discounts to paise using `HALF_UP`, applies the maximum discount where defined, then caps the applied discount at the purchase amount. The estimated payable therefore cannot be negative. No stacking, gift-card application, or optimization is performed.
+
+Create a draft purchase, then submit one eligible offer as its proposal:
+
+```cmd
+curl -u dev@paisavasool.local:choose-a-local-password ^
+  -H "Content-Type: application/json" ^
+  -d "{\"offerId\":\"<offer-uuid>\"}" ^
+  http://localhost:8080/api/groups/<group-uuid>/purchases/<purchase-uuid>/proposal
+```
+
+Purchase proposal and lifecycle endpoints:
+
+- `POST /api/groups/{groupId}/purchases/{purchaseId}/proposal` with `{"offerId":"<offer-uuid>"}` — revalidate and attach one eligible offer to a `DRAFT` purchase, snapshot its terms and calculated discount/payable, and move it to `PENDING_APPROVAL` (`201`).
+- `GET /api/groups/{groupId}/purchases/{purchaseId}/proposal` — retrieve the persisted proposal and calculated price.
+- `POST /api/groups/{groupId}/purchases/{purchaseId}/approve` — approve a pending proposal (`200`).
+- `POST /api/groups/{groupId}/purchases/{purchaseId}/cancel` — cancel a draft, pending, or approved purchase (`200`).
+- `POST /api/groups/{groupId}/purchases/{purchaseId}/complete-simulated` — record completion of an approved purchase as `SIMULATED` (`200`).
+
+The lifecycle is `DRAFT → PENDING_APPROVAL → APPROVED → COMPLETED`; cancellation is allowed from `DRAFT`, `PENDING_APPROVAL`, or `APPROVED`. Invalid transitions return `409`. The authenticated actor and timestamp are recorded for approval, cancellation, and simulated completion. Proposal snapshots preserve merchant, offer terms, original pricing rules, validity, applied discount, and expected payable even if the catalog entry is later edited or deactivated. Client-supplied creator, action actor, approval status, discount, and payable values are never trusted.
+
+`COMPLETED` with `completionType: SIMULATED` records an application workflow outcome only. It does not represent a verified purchase, transfer money, or create a Week 3 `Expense`. Record a separate expense through the ledger API only when appropriate; estimates and simulated workflow states do not change balances. V4 adds the catalog and sample rows, V5 adds purchase proposal snapshots, and V6 adds workflow audit fields. Hibernate continues to validate the Flyway-managed schema.
+
+See [the Week 4 offer and purchase workflow architecture](./docs/week-4-offer-workflow.md) for the service flow, entity relationships, and state/price invariants.
+
 ## Expense ledger API
 
 All ledger endpoints require an active group member, authenticated using the development-only HTTP Basic identity described above. Amounts are INR with exactly two decimal places of precision. Amounts must be positive and are rejected rather than rounded if they have more than two fractional digits. `paidByMembershipId`, allocation membership IDs, and settlement participant IDs identify group memberships; the backend validates that each belongs to the specified group and is active. The creator is always derived from the authenticated principal.
@@ -195,7 +232,7 @@ npm run build
 1. Start PostgreSQL using the Compose command above.
 2. Configure the local development identity and start the backend.
 3. Open `http://localhost:8080/api/health`. Confirm the response reports `UP` for both the service and database.
-4. Use the group API to create a group, add a member, and record a purchase estimate. Use the ledger API to record an expense, retrieve balances, and record a simulated settlement.
+4. Use the group and purchase APIs to create a draft, browse offers, submit a proposal, approve it, and record a simulated completion. Separately use the ledger API to record an expense, retrieve balances, and record a simulated settlement.
 5. Start the frontend and open its Vite URL. The frontend currently displays the Week 1 service health screen.
 6. If the database is stopped, the API health endpoint returns HTTP 503; the frontend shows that the database check failed.
 
@@ -211,6 +248,6 @@ npm run build
 
 ## Current scope
 
-Implemented: group/member management, purchase estimate creation/listing, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Only active group members can access group APIs and the ledger. Purchase status transitions are guarded in the domain model, but no purchase approval or transition endpoint exists yet.
+Implemented: group/member management, a seeded fictional offer catalog, purchase proposal snapshots and lifecycle actions, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Active group membership is required for group-scoped catalog, purchase, and ledger operations.
 
-Not implemented: production identity/authentication, invitations, offer discovery, optimization, or real payment execution. Do not treat the development identity or purchase estimates as financial records. The internal ledger records user-reported expenses and settlements; it does not verify external payments.
+Not implemented: production identity/authentication, invitations, offer catalog administration, gift-card application, offer combination optimization, or real payment execution. Do not treat the development identity, purchase estimates, or simulated purchase completions as proof of spending. The internal ledger records user-reported expenses and settlements; it does not verify external payments.

@@ -28,6 +28,9 @@ import com.paisavasool.app.domain.expense.Settlement;
 import com.paisavasool.app.domain.expense.SettlementRepository;
 import com.paisavasool.app.domain.purchase.Purchase;
 import com.paisavasool.app.domain.purchase.PurchaseRepository;
+import com.paisavasool.app.domain.offer.Offer;
+import com.paisavasool.app.domain.offer.OfferRepository;
+import com.paisavasool.app.domain.offer.OfferType;
 import com.paisavasool.app.domain.user.User;
 import com.paisavasool.app.domain.user.UserRepository;
 
@@ -65,6 +68,114 @@ class DomainPersistenceTest {
 
     @Autowired
     private PurchaseRepository purchaseRepository;
+
+    @Autowired
+    private OfferRepository offerRepository;
+
+    @Test
+    void flywaySeedsClearlyMarkedOffersAndJpaMappingsPersistNewOffers() {
+        List<Offer> samples = offerRepository.findAllByActiveTrueOrderByMerchantNameAscTitleAsc();
+
+        assertThat(samples).hasSize(2).allMatch(Offer::isSample);
+
+        Offer offer = offerRepository.saveAndFlush(new Offer(
+            "Test Merchant",
+            "Test fixed discount",
+            "A test-only offer.",
+            OfferType.FIXED_DISCOUNT,
+            null,
+            new BigDecimal("25.00"),
+            new BigDecimal("100.00"),
+            null,
+            Instant.parse("2026-01-01T00:00:00Z"),
+            Instant.parse("2027-01-01T00:00:00Z"),
+            true,
+            true,
+            "Test terms only."
+        ));
+
+        assertThat(offer.getId()).isNotNull();
+        assertThat(offerRepository.findById(offer.getId())).get()
+            .extracting(Offer::getDiscountAmount)
+            .isEqualTo(new BigDecimal("25.00"));
+    }
+
+    @Test
+    void databaseRejectsOfferWithMissingPercentageDiscountValue() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+            """
+                INSERT INTO app.offers (
+                    id, merchant_name, title, description, offer_type,
+                    discount_percentage, discount_amount, minimum_spend, maximum_discount,
+                    valid_from, valid_until, active, is_sample, terms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            java.util.UUID.randomUUID(),
+            "Test Merchant",
+            "Invalid offer",
+            "Database constraint test",
+            OfferType.PERCENTAGE_DISCOUNT.name(),
+            null,
+            null,
+            BigDecimal.ZERO,
+            null,
+            Instant.parse("2026-01-01T00:00:00Z"),
+            Instant.parse("2027-01-01T00:00:00Z"),
+            true,
+            true,
+            "Test terms"
+        )).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void databaseRejectsInvalidOfferDateRange() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+            """
+                INSERT INTO app.offers (
+                    id, merchant_name, title, description, offer_type,
+                    discount_percentage, discount_amount, minimum_spend, maximum_discount,
+                    valid_from, valid_until, active, is_sample, terms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            java.util.UUID.randomUUID(),
+            "Test Merchant",
+            "Invalid dates",
+            "Database constraint test",
+            OfferType.PERCENTAGE_DISCOUNT.name(),
+            new BigDecimal("10.00"),
+            null,
+            BigDecimal.ZERO,
+            null,
+            Instant.parse("2027-01-01T00:00:00Z"),
+            Instant.parse("2026-01-01T00:00:00Z"),
+            true,
+            true,
+            "Test terms"
+        )).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void databaseRejectsIncompleteSimulatedCompletionAudit() {
+        User user = userRepository.saveAndFlush(new User("Asha", "audit@example.com"));
+        Group group = groupRepository.saveAndFlush(new Group("Audit test"));
+        GroupMembership member = membershipRepository.saveAndFlush(new GroupMembership(
+            user, group, MembershipRole.OWNER, MembershipStatus.ACTIVE
+        ));
+        Purchase purchase = purchaseRepository.saveAndFlush(
+            new Purchase(group, user, "Test purchase", new BigDecimal("25.00"))
+        );
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+            """
+                UPDATE app.purchases
+                SET completed_by_membership_id = ?, completed_at = ?, completion_type = NULL
+                WHERE id = ?
+                """,
+            member.getId(),
+            Instant.parse("2026-01-01T00:00:00Z"),
+            purchase.getId()
+        )).isInstanceOf(DataIntegrityViolationException.class);
+    }
 
     @Test
     void flywaySchemaAndJpaMappingsPersistDomainRecords() {

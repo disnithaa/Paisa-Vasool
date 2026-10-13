@@ -15,6 +15,7 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +28,11 @@ import com.paisavasool.app.domain.group.MembershipStatus;
 import com.paisavasool.app.domain.expense.ExpenseAllocationRepository;
 import com.paisavasool.app.domain.expense.ExpenseRepository;
 import com.paisavasool.app.domain.expense.SettlementRepository;
+import com.paisavasool.app.domain.offer.Offer;
+import com.paisavasool.app.domain.offer.OfferRepository;
+import com.paisavasool.app.domain.offer.OfferType;
+import com.paisavasool.app.domain.purchase.Purchase;
+import com.paisavasool.app.domain.purchase.PurchaseRepository;
 import com.paisavasool.app.domain.user.User;
 import com.paisavasool.app.domain.user.UserRepository;
 
@@ -69,6 +75,15 @@ class GroupPurchaseApiTest {
 
     @Autowired
     private SettlementRepository settlementRepository;
+
+    @Autowired
+    private PurchaseRepository purchaseRepository;
+
+    @Autowired
+    private OfferRepository offerRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void groupCanBeCreatedAndRetrievedByItsOwner() throws Exception {
@@ -225,6 +240,337 @@ class GroupPurchaseApiTest {
                         """))
                 .andExpect(status().isForbidden());
         }
+    }
+
+    @Test
+    void activeGroupMemberCanBrowseOfferCatalogAndDetails() throws Exception {
+        String groupId = createGroup("Offer browsing");
+
+        String response = mockMvc.perform(get("/api/groups/{groupId}/offers", groupId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(2))
+            .andExpect(jsonPath("$[0].sample").value(true))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+        String offerId = jsonValue(response, "[0].id");
+
+        mockMvc.perform(get("/api/groups/{groupId}/offers/{offerId}", groupId, offerId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(offerId))
+            .andExpect(jsonPath("$.terms").value(
+                "Sample terms only. This fictional offer has no real-world value."
+            ));
+    }
+
+    @Test
+    void offerCatalogRejectsNonMembersAndUnknownOffers() throws Exception {
+        String groupId = createGroup("Offer access");
+        User otherUser = userRepository.saveAndFlush(new User("Other", "other@example.com"));
+        Group otherGroup = groupRepository.saveAndFlush(new Group("Other group"));
+        membershipRepository.saveAndFlush(new GroupMembership(
+            otherUser, otherGroup, MembershipRole.OWNER, MembershipStatus.ACTIVE
+        ));
+
+        mockMvc.perform(get("/api/groups/{groupId}/offers", otherGroup.getId())
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/groups/{groupId}/offers/{offerId}", groupId, UUID.randomUUID())
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void leftMemberCannotBrowseOfferCatalog() throws Exception {
+        String groupId = createGroup("Former member");
+        User devUser = userRepository.findByEmail(DEV_EMAIL).orElseThrow();
+        membershipRepository.findByGroup_IdAndUser_Id(
+            UUID.fromString(groupId),
+            devUser.getId()
+        ).orElseThrow().leave();
+        membershipRepository.flush();
+
+        mockMvc.perform(get("/api/groups/{groupId}/offers", groupId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void eligibleOffersUsePurchaseAmountAndReturnExplicitRejectionReasons() throws Exception {
+        String groupId = createGroup("Offer eligibility");
+        String purchaseId = createPurchase(groupId, "Dinner", "400.00");
+
+        mockMvc.perform(get(
+                "/api/groups/{groupId}/purchases/{purchaseId}/eligible-offers",
+                groupId,
+                purchaseId
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].offer.offerType").value("PERCENTAGE_DISCOUNT"))
+            .andExpect(jsonPath("$[0].eligible").value(false))
+            .andExpect(jsonPath("$[0].ineligibilityReason").value("MINIMUM_SPEND_NOT_MET"))
+            .andExpect(jsonPath("$[1].offer.offerType").value("FIXED_DISCOUNT"))
+            .andExpect(jsonPath("$[1].eligible").value(true))
+            .andExpect(jsonPath("$[1].discountAmount").value(75.00))
+            .andExpect(jsonPath("$[1].finalAmount").value(325.00));
+    }
+
+    @Test
+    void offerEligibilityRequiresGroupMembershipAndDraftPurchase() throws Exception {
+        String groupId = createGroup("Offer eligibility");
+        String purchaseId = createPurchase(groupId, "Dinner", "400.00");
+        User otherUser = userRepository.saveAndFlush(new User("Other", "other@example.com"));
+        Group otherGroup = groupRepository.saveAndFlush(new Group("Other group"));
+        membershipRepository.saveAndFlush(new GroupMembership(
+            otherUser, otherGroup, MembershipRole.OWNER, MembershipStatus.ACTIVE
+        ));
+
+        mockMvc.perform(get(
+                "/api/groups/{groupId}/purchases/{purchaseId}/eligible-offers",
+                otherGroup.getId(),
+                purchaseId
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get(
+                "/api/groups/{groupId}/purchases/{purchaseId}/eligible-offers",
+                groupId,
+                UUID.randomUUID()
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isNotFound());
+
+        Purchase purchase = purchaseRepository.findById(UUID.fromString(purchaseId)).orElseThrow();
+        purchase.cancel(
+            membershipRepository.findById(UUID.fromString(getMembershipId(groupId, DEV_EMAIL))).orElseThrow(),
+            java.time.Instant.now()
+        );
+        purchaseRepository.flush();
+
+        mockMvc.perform(get(
+                "/api/groups/{groupId}/purchases/{purchaseId}/eligible-offers",
+                groupId,
+                purchaseId
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void eligibleOfferCanBeProposedAndItsPriceTermsAreSnapshotted() throws Exception {
+        String groupId = createGroup("Proposal");
+        String purchaseId = createPurchase(groupId, "Dinner", "400.00");
+        Offer selectedOffer = findSampleOffer(OfferType.FIXED_DISCOUNT);
+
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                groupId,
+                purchaseId
+            )
+                .with(httpBasic(DEV_EMAIL, "test-secret"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"offerId":"%s"}
+                    """.formatted(selectedOffer.getId())))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"))
+            .andExpect(jsonPath("$.createdByEmail").value(DEV_EMAIL))
+            .andExpect(jsonPath("$.offer.offerId").value(selectedOffer.getId().toString()))
+            .andExpect(jsonPath("$.offer.title").value("Sample: 75 INR off"))
+            .andExpect(jsonPath("$.offer.discountAmount").value(75.00))
+            .andExpect(jsonPath("$.appliedDiscountAmount").value(75.00))
+            .andExpect(jsonPath("$.expectedFinalAmount").value(325.00))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+        jdbcTemplate.update(
+            "UPDATE app.offers SET title = ?, discount_amount = ?, terms = ? WHERE id = ?",
+            "Edited catalog title",
+            new java.math.BigDecimal("200.00"),
+            "Edited catalog terms",
+            selectedOffer.getId()
+        );
+
+        mockMvc.perform(get(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                groupId,
+                purchaseId
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.offer.title").value("Sample: 75 INR off"))
+            .andExpect(jsonPath("$.offer.discountAmount").value(75.00))
+            .andExpect(jsonPath("$.offer.terms").value(
+                "Sample terms only. This fictional offer has no real-world value."
+            ))
+            .andExpect(jsonPath("$.appliedDiscountAmount").value(75.00))
+            .andExpect(jsonPath("$.expectedFinalAmount").value(325.00));
+
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                groupId,
+                purchaseId
+            )
+                .with(httpBasic(DEV_EMAIL, "test-secret"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"offerId":"%s"}
+                    """.formatted(selectedOffer.getId())))
+            .andExpect(status().isConflict());
+
+        org.assertj.core.api.Assertions.assertThat(expenseRepository.count()).isZero();
+    }
+
+    @Test
+    void proposalRejectsIneligibleOfferAndLeavesPurchaseDraft() throws Exception {
+        String groupId = createGroup("Proposal");
+        String purchaseId = createPurchase(groupId, "Dinner", "400.00");
+        Offer percentageOffer = findSampleOffer(OfferType.PERCENTAGE_DISCOUNT);
+
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                groupId,
+                purchaseId
+            )
+                .with(httpBasic(DEV_EMAIL, "test-secret"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"offerId":"%s"}
+                    """.formatted(percentageOffer.getId())))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.detail", containsString("MINIMUM_SPEND_NOT_MET")));
+
+        mockMvc.perform(get("/api/groups/{groupId}/purchases", groupId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].status").value("DRAFT"));
+
+        mockMvc.perform(get(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                groupId,
+                purchaseId
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void proposalRequiresActiveGroupMembershipAndReturnsNotFoundForUnknownOffer() throws Exception {
+        String groupId = createGroup("Proposal");
+        String purchaseId = createPurchase(groupId, "Dinner", "400.00");
+        User otherUser = userRepository.saveAndFlush(new User("Other", "other@example.com"));
+        Group otherGroup = groupRepository.saveAndFlush(new Group("Other group"));
+        membershipRepository.saveAndFlush(new GroupMembership(
+            otherUser, otherGroup, MembershipRole.OWNER, MembershipStatus.ACTIVE
+        ));
+
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                otherGroup.getId(),
+                purchaseId
+            )
+                .with(httpBasic(DEV_EMAIL, "test-secret"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"offerId":"%s"}
+                    """.formatted(UUID.randomUUID())))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                groupId,
+                purchaseId
+            )
+                .with(httpBasic(DEV_EMAIL, "test-secret"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"offerId":"%s"}
+                    """.formatted(UUID.randomUUID())))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void activeMemberCanApproveAndCompletePurchaseAsSimulatedWithoutCreatingExpense() throws Exception {
+        String groupId = createGroup("Simulated purchase");
+        String purchaseId = createPurchase(groupId, "Dinner", "400.00");
+        proposePurchase(groupId, purchaseId, findSampleOffer(OfferType.FIXED_DISCOUNT).getId());
+
+        mockMvc.perform(post("/api/groups/{groupId}/purchases/{purchaseId}/approve", groupId, purchaseId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("APPROVED"))
+            .andExpect(jsonPath("$.approvedBy.email").value(DEV_EMAIL))
+            .andExpect(jsonPath("$.approvedAt").exists());
+
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/complete-simulated",
+                groupId,
+                purchaseId
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("COMPLETED"))
+            .andExpect(jsonPath("$.completionType").value("SIMULATED"))
+            .andExpect(jsonPath("$.completedBy.email").value(DEV_EMAIL))
+            .andExpect(jsonPath("$.completedAt").exists());
+
+        org.assertj.core.api.Assertions.assertThat(expenseRepository.count()).isZero();
+        mockMvc.perform(get("/api/groups/{groupId}/balances", groupId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.totalBalance").value(0.00));
+    }
+
+    @Test
+    void activeMemberCanCancelDraftOrPendingProposalButCannotRepeatTerminalActions() throws Exception {
+        String groupId = createGroup("Cancellation");
+        String draftId = createPurchase(groupId, "Unsubmitted purchase", "20.00");
+
+        mockMvc.perform(post("/api/groups/{groupId}/purchases/{purchaseId}/cancel", groupId, draftId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("CANCELLED"))
+            .andExpect(jsonPath("$.cancelledBy.email").value(DEV_EMAIL))
+            .andExpect(jsonPath("$.cancelledAt").exists());
+
+        mockMvc.perform(post("/api/groups/{groupId}/purchases/{purchaseId}/cancel", groupId, draftId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isConflict());
+
+        String pendingId = createPurchase(groupId, "Pending purchase", "400.00");
+        proposePurchase(groupId, pendingId, findSampleOffer(OfferType.FIXED_DISCOUNT).getId());
+        mockMvc.perform(post("/api/groups/{groupId}/purchases/{purchaseId}/cancel", groupId, pendingId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("CANCELLED"))
+            .andExpect(jsonPath("$.cancelledBy.email").value(DEV_EMAIL));
+    }
+
+    @Test
+    void purchaseActionsRejectInvalidTransitionsAndNonMembers() throws Exception {
+        String groupId = createGroup("Purchase action authorization");
+        String draftId = createPurchase(groupId, "Draft purchase", "400.00");
+
+        mockMvc.perform(post("/api/groups/{groupId}/purchases/{purchaseId}/approve", groupId, draftId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isConflict());
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/complete-simulated",
+                groupId,
+                draftId
+            ).with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isConflict());
+
+        String purchaseId = createPurchase(groupId, "Pending purchase", "400.00");
+        proposePurchase(groupId, purchaseId, findSampleOffer(OfferType.FIXED_DISCOUNT).getId());
+        User devUser = userRepository.findByEmail(DEV_EMAIL).orElseThrow();
+        membershipRepository.findByGroup_IdAndUser_Id(UUID.fromString(groupId), devUser.getId())
+            .orElseThrow()
+            .leave();
+        membershipRepository.flush();
+
+        mockMvc.perform(post("/api/groups/{groupId}/purchases/{purchaseId}/approve", groupId, purchaseId)
+                .with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -557,6 +903,41 @@ class GroupPurchaseApiTest {
         return jsonValue(body, "id");
     }
 
+    private String createPurchase(String groupId, String title, String amount) throws Exception {
+        String body = mockMvc.perform(post("/api/groups/{groupId}/purchases", groupId)
+                .with(httpBasic(DEV_EMAIL, "test-secret"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"title":"%s","estimatedAmount":%s}
+                    """.formatted(title, amount)))
+            .andExpect(status().isCreated())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+        return jsonValue(body, "id");
+    }
+
+    private Offer findSampleOffer(OfferType type) {
+        return offerRepository.findAllByActiveTrueOrderByMerchantNameAscTitleAsc().stream()
+            .filter(offer -> offer.getOfferType() == type)
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private void proposePurchase(String groupId, String purchaseId, UUID offerId) throws Exception {
+        mockMvc.perform(post(
+                "/api/groups/{groupId}/purchases/{purchaseId}/proposal",
+                groupId,
+                purchaseId
+            )
+                .with(httpBasic(DEV_EMAIL, "test-secret"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"offerId":"%s"}
+                    """.formatted(offerId)))
+            .andExpect(status().isCreated());
+    }
+
     private String addMember(String groupId, String name, String email) throws Exception {
         mockMvc.perform(post("/api/groups/{groupId}/members", groupId)
                 .with(httpBasic(DEV_EMAIL, "test-secret"))
@@ -605,10 +986,14 @@ class GroupPurchaseApiTest {
 
     private static String jsonValue(String json, String field) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper()
-                .readTree(json)
-                .get(field)
-                .asText();
+            com.fasterxml.jackson.databind.JsonNode node =
+                new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+            for (String part : field.split("\\.")) {
+                node = part.matches("\\[\\d+\\]")
+                    ? node.get(Integer.parseInt(part.substring(1, part.length() - 1)))
+                    : node.get(part);
+            }
+            return node.asText();
         } catch (Exception exception) {
             throw new AssertionError("Could not read response field " + field, exception);
         }

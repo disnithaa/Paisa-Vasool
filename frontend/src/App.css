@@ -1,0 +1,23 @@
+#root { min-height: 100vh; }
+.dashboard { width: min(1100px, calc(100% - 48px)); margin: 0 auto; }
+.topbar { height: 88px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e9e6df; }
+.brand { color: #19372e; text-decoration: none; font-size: 23px; font-weight: 800; letter-spacing: -1px; }
+.brand span { color: #d17a45; }
+.stage, .eyebrow { color: #718078; font-size: 11px; font-weight: 750; letter-spacing: 1.8px; }
+.welcome { padding: 82px 0 72px; max-width: 650px; }
+.eyebrow { margin: 0 0 22px; }
+h1 { margin: 0; color: #19372e; font-size: clamp(48px, 7vw, 76px); line-height: .99; letter-spacing: -4px; font-weight: 680; }
+.intro { max-width: 520px; margin-top: 22px; color: #65726b; font-size: 18px; line-height: 1.65; }
+.status-card { display: flex; align-items: center; gap: 13px; margin-top: 34px; padding: 16px 18px; border: 1px solid #e9e6df; border-radius: 12px; background: #fff; box-shadow: 0 8px 28px #1b362d0a; }
+.status-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: #c47a54; }
+.status-dot.online { background: #3b9b72; box-shadow: 0 0 0 4px #3b9b7218; }
+.status-card strong { color: #253c33; font-size: 14px; }
+.status-card p { margin: 3px 0 0; color: #768179; font-size: 13px; }
+.service-name { margin-left: auto; color: #929b95; font: 11px ui-monospace, monospace; }
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; padding: 32px 0 44px; border-top: 1px solid #e9e6df; }
+.features article { padding-right: 20px; }
+.number { color: #d17a45; font: 700 12px ui-monospace, monospace; }
+.features h2 { margin: 15px 0 8px; color: #19372e; font-size: 18px; font-weight: 650; }
+.features p { margin: 0; color: #748078; font-size: 14px; line-height: 1.6; }
+footer { padding: 18px 0 30px; border-top: 1px solid #e9e6df; color: #929b95; font-size: 12px; }
+@media (max-width: 650px) { .dashboard { width: min(100% - 36px, 520px); } .topbar { height: 72px; } .stage { font-size: 9px; letter-spacing: 1px; } .welcome { padding: 60px 0 54px; } h1 { letter-spacing: -2.5px; } .intro { font-size: 16px; } .features { grid-template-columns: 1fr; gap: 25px; } .service-name { display: none; } }

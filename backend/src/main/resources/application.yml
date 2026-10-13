@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: paisa-vasool-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/paisa_vasool}
+    username: ${DB_USERNAME:paisa}
+    password: ${DB_PASSWORD:paisa123}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    schemas: app
+    default-schema: app
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173

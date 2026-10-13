@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+!.env.example
+application-local.properties
+
+# Java / Maven
+target/
+*.class
+
+# Node / React
+node_modules/
+dist/
+
+# Python
+__pycache__/
+.venv/
+*.py[cod]
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

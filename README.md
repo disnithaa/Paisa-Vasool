@@ -4,7 +4,7 @@ Paisa Vasool is a group spending and savings application. Its initial product jo
 
 ## Implemented scope
 
-The foundation includes a React + TypeScript + Vite frontend, a Java 21 / Spring Boot REST API, PostgreSQL in Docker Compose, Flyway migrations, and a database-backed health check. The backend supports users, groups, memberships, a fictional offer catalog, purchase proposals and approvals, and an internal expense ledger with allocations, derived balances, and simulated settlements. A purchase proposal or simulated completion does not create a ledger expense; only a separately recorded expense changes balances. No real payments are executed.
+The foundation includes a React + TypeScript + Vite frontend, a Java 21 / Spring Boot REST API, PostgreSQL in Docker Compose, Flyway migrations, and a database-backed health check. The backend supports users, groups, memberships, a fictional offer catalog, purchase proposals and approvals, and an internal expense ledger with allocations, derived balances, and simulated settlements. A separate stateless Python optimization service evaluates a purchase and supplied discounts; it is not yet integrated with the Java backend. A purchase proposal or simulated completion does not create a ledger expense; only a separately recorded expense changes balances. No real payments are executed.
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ paisa-vasool/
 ├── frontend/      React + TypeScript + Vite application
 ├── infra/         Local PostgreSQL Compose configuration
 ├── docs/          Architecture and project documentation
-├── optimizer/     Reserved for the later Python optimization service
+├── optimizer/     Independent FastAPI / OR-Tools optimization service
 └── README.md
 ```
 
@@ -93,6 +93,28 @@ To use another database, set `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` in the b
 ### Development identity warning
 
 The local HTTP Basic account is a development-only identity mechanism, not production authentication. Its password is configured by the process environment and must not be reused or enabled on a public deployment. Basic authentication over plain HTTP is suitable only for local development. The authenticated principal's configured email determines the current user; the API never accepts a caller user ID as proof of identity. An email in the add-member request identifies the person to add, not the caller.
+
+## Run the Python optimizer
+
+The optimizer runs independently and accepts a purchase amount and offer terms in each request. It does not access PostgreSQL or call the Java backend; Java integration is planned for Week 6.
+
+From PowerShell:
+
+```powershell
+Set-Location optimizer
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+The service listens on `http://127.0.0.1:8000`; OpenAPI docs are at `http://127.0.0.1:8000/docs`. Run its tests in another terminal with the environment activated:
+
+```powershell
+python -m pytest -q
+```
+
+See [the optimizer contract and mathematical model](./optimizer/README.md) for supported offers, validation rules, example requests/responses, and limitations. The [Week 5 architecture note](./docs/optimizer-architecture.md) describes its component flow and service boundary.
 
 ## Group and purchase APIs
 
@@ -250,4 +272,4 @@ npm run build
 
 Implemented: group/member management, a seeded fictional offer catalog, purchase proposal snapshots and lifecycle actions, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Active group membership is required for group-scoped catalog, purchase, and ledger operations.
 
-Not implemented: production identity/authentication, invitations, offer catalog administration, gift-card application, offer combination optimization, or real payment execution. Do not treat the development identity, purchase estimates, or simulated purchase completions as proof of spending. The internal ledger records user-reported expenses and settlements; it does not verify external payments.
+Not implemented: production identity/authentication, invitations, offer catalog administration, gift-card application, offer stacking, Java–Python optimizer integration (planned Week 6), or real payment execution. The standalone optimizer is an estimate-only service and does not change a purchase or create a ledger expense. Do not treat the development identity, purchase estimates, or simulated purchase completions as proof of spending. The internal ledger records user-reported expenses and settlements; it does not verify external payments.

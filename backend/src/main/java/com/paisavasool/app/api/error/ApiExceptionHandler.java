@@ -13,6 +13,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.paisavasool.app.integration.optimizer.InvalidOptimizerResponseException;
+import com.paisavasool.app.integration.optimizer.OptimizerUnavailableException;
+
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
@@ -29,6 +32,15 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     ProblemDetail handleForbidden(ForbiddenException exception, HttpServletRequest request) {
         return problem(HttpStatus.FORBIDDEN, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({OptimizerUnavailableException.class, InvalidOptimizerResponseException.class})
+    ProblemDetail handleOptimizerFailure(RuntimeException exception, HttpServletRequest request) {
+        return problem(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "A valid optimization recommendation is temporarily unavailable",
+            request
+        );
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

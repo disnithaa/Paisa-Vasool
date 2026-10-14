@@ -42,3 +42,7 @@ app:
     allowed-origins:
       - http://localhost:5173
       - http://127.0.0.1:5173
+  optimizer:
+    base-url: ${OPTIMIZER_BASE_URL:http://localhost:8000}
+    connect-timeout: ${OPTIMIZER_CONNECT_TIMEOUT:1s}
+    read-timeout: ${OPTIMIZER_READ_TIMEOUT:3s}

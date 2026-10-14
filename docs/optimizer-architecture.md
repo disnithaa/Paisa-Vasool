@@ -21,7 +21,10 @@ The service receives the complete purchase amount, evaluation time, and candidat
 - Java remains authoritative for users, group authorization, catalog data, purchase state, and the expense ledger.
 - The optimizer does not connect to PostgreSQL, authorize a user, approve or update a purchase, record an expense, or execute a payment.
 - The request's `active`, validity, and discount fields are supplied inputs. The service checks that those fields are internally consistent and computes eligibility, but cannot verify who is allowed to use an offer or whether supplied catalog data is current.
-- The standalone HTTP service is implemented in Week 5. Java-to-Python REST integration is planned for Week 6 and is not present in the current system.
+- The standalone HTTP service is implemented in Week 5. In Week 6, the Java backend added a purchase-scoped REST client and authenticated API endpoint. Java filters the offer catalog using its own pricing and eligibility rules before calling Python and independently validates the returned recommendation.
+- Recommendations are ephemeral and do not mutate or persist purchase, offer, approval, payment, or ledger state. Java makes the call outside a database transaction and maps optimizer failures or malformed responses to HTTP `503`.
+
+The Java HTTP boundary is `POST /api/groups/{groupId}/purchases/{purchaseId}/optimization`; it accepts no client-supplied financial data. The internal Python contract remains `POST /api/v1/optimize` and uses decimal strings for all money. Java configures its optimizer URL and bounded timeouts using `OPTIMIZER_BASE_URL`, `OPTIMIZER_CONNECT_TIMEOUT`, and `OPTIMIZER_READ_TIMEOUT`.
 
 ## Runtime components
 

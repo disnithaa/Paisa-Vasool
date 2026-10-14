@@ -4,7 +4,7 @@ Paisa Vasool is a group spending and savings application. Its initial product jo
 
 ## Implemented scope
 
-The foundation includes a React + TypeScript + Vite frontend, a Java 21 / Spring Boot REST API, PostgreSQL in Docker Compose, Flyway migrations, and a database-backed health check. The backend supports users, groups, memberships, a fictional offer catalog, purchase proposals and approvals, and an internal expense ledger with allocations, derived balances, and simulated settlements. A separate stateless Python optimization service evaluates a purchase and supplied discounts; it is not yet integrated with the Java backend. A purchase proposal or simulated completion does not create a ledger expense; only a separately recorded expense changes balances. No real payments are executed.
+The foundation includes a React + TypeScript + Vite frontend, a Java 21 / Spring Boot REST API, PostgreSQL in Docker Compose, Flyway migrations, and a database-backed health check. The backend supports users, groups, memberships, a fictional offer catalog, purchase proposals and approvals, and an internal expense ledger with allocations, derived balances, and simulated settlements. The Java backend can request a recommendation from the separate stateless Python optimization service for a draft purchase. Java remains authoritative for group access, purchase state, offer eligibility, and financial records. A recommendation does not alter the purchase or create a ledger expense. A purchase proposal or simulated completion also does not create a ledger expense; only a separately recorded expense changes balances. No real payments are executed.
 
 ## Prerequisites
 
@@ -90,13 +90,15 @@ The first startup applies Flyway migrations and checks PostgreSQL connectivity. 
 
 To use another database, set `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` in the backend process environment. Defaults match the Compose configuration.
 
+The optimizer base URL defaults to `http://localhost:8000`. Override it with `OPTIMIZER_BASE_URL` when the Python service runs elsewhere. `OPTIMIZER_CONNECT_TIMEOUT` and `OPTIMIZER_READ_TIMEOUT` configure its HTTP timeouts; the defaults are `1s` and `3s`. The Python service must be running for purchase optimization requests; unavailable or invalid optimizer responses are reported as HTTP `503`, not as a fabricated recommendation.
+
 ### Development identity warning
 
 The local HTTP Basic account is a development-only identity mechanism, not production authentication. Its password is configured by the process environment and must not be reused or enabled on a public deployment. Basic authentication over plain HTTP is suitable only for local development. The authenticated principal's configured email determines the current user; the API never accepts a caller user ID as proof of identity. An email in the add-member request identifies the person to add, not the caller.
 
 ## Run the Python optimizer
 
-The optimizer runs independently and accepts a purchase amount and offer terms in each request. It does not access PostgreSQL or call the Java backend; Java integration is planned for Week 6.
+The optimizer runs independently and accepts a purchase amount and offer terms in each request. It does not access PostgreSQL or call the Java backend. The Java backend calls it over REST and supplies only candidates already deemed eligible by Java.
 
 From PowerShell:
 
@@ -166,8 +168,18 @@ Offer and eligibility endpoints:
 - `GET /api/groups/{groupId}/offers` — browse active offers within their validity window.
 - `GET /api/groups/{groupId}/offers/{offerId}` — retrieve offer details and terms.
 - `GET /api/groups/{groupId}/purchases/{purchaseId}/eligible-offers` — evaluate the draft purchase amount against active catalog entries and return each evaluation with either its calculated price or a rejection reason.
+- `POST /api/groups/{groupId}/purchases/{purchaseId}/optimization` — request a recommendation for an existing `DRAFT` purchase. The body is empty: Java loads the purchase and catalog, checks active group membership and eligibility, and sends the validated candidate terms to Python. The response contains the purchase ID, base amount, selected offer (if any), discount, estimated payable, savings, explanation, and solver metadata. Java verifies the returned currency, exact INR amounts, savings arithmetic, selected-offer membership, and price against its own pricing calculation before responding. The response is ephemeral; the purchase remains `DRAFT`, and no proposal, approval, payment, or ledger expense is created. Non-draft purchases return `409`; unauthorized/non-member requests use the existing `401`/`403` behavior; optimizer failures return `503` Problem Details.
 
-Offers are either `PERCENTAGE_DISCOUNT` or `FIXED_DISCOUNT`; the two value fields are distinct, not interchangeable. Percentage discounts are greater than zero and at most 100%. Minimum spend and fixed discounts are INR `BigDecimal` values with two decimal places; percentage offers may define a maximum discount. Validity starts inclusively at `validFrom` and ends exclusively at `validUntil`. The pricing component rounds percentage discounts to paise using `HALF_UP`, applies the maximum discount where defined, then caps the applied discount at the purchase amount. The estimated payable therefore cannot be negative. No stacking, gift-card application, or optimization is performed.
+Request a recommendation with the optimizer service already running:
+
+```cmd
+curl -u dev@paisavasool.local:choose-a-local-password -X POST ^
+  http://localhost:8080/api/groups/<group-uuid>/purchases/<purchase-uuid>/optimization
+```
+
+Java sends the Python service lossless decimal strings and timezone-aware ISO-8601 timestamps. The optimizer's versioned internal route is `POST /api/v1/optimize`; callers should use the authenticated Java purchase-scoped route rather than sending client-provided amounts or offers directly.
+
+Offers are either `PERCENTAGE_DISCOUNT` or `FIXED_DISCOUNT`; the two value fields are distinct, not interchangeable. Percentage discounts are greater than zero and at most 100%. Minimum spend and fixed discounts are INR `BigDecimal` values with two decimal places; percentage offers may define a maximum discount. Validity starts inclusively at `validFrom` and ends exclusively at `validUntil`. The pricing component rounds percentage discounts to paise using `HALF_UP`, applies the maximum discount where defined, then caps the applied discount at the purchase amount. The estimated payable therefore cannot be negative. No offer stacking or gift-card application is supported. The separate optimization endpoint compares the no-offer baseline against eligible single-offer choices; it does not change the proposal workflow or create a ledger expense.
 
 Create a draft purchase, then submit one eligible offer as its proposal:
 
@@ -254,7 +266,7 @@ npm run build
 1. Start PostgreSQL using the Compose command above.
 2. Configure the local development identity and start the backend.
 3. Open `http://localhost:8080/api/health`. Confirm the response reports `UP` for both the service and database.
-4. Use the group and purchase APIs to create a draft, browse offers, submit a proposal, approve it, and record a simulated completion. Separately use the ledger API to record an expense, retrieve balances, and record a simulated settlement.
+4. Start the Python optimizer as described above. Use the group and purchase APIs to create a draft, browse offers, and request an optimization recommendation while the purchase is still a draft. The recommendation does not change purchase state. Then submit a proposal, approve it, and record a simulated completion. Separately use the ledger API to record an expense, retrieve balances, and record a simulated settlement.
 5. Start the frontend and open its Vite URL. The frontend currently displays the Week 1 service health screen.
 6. If the database is stopped, the API health endpoint returns HTTP 503; the frontend shows that the database check failed.
 
@@ -270,6 +282,6 @@ npm run build
 
 ## Current scope
 
-Implemented: group/member management, a seeded fictional offer catalog, purchase proposal snapshots and lifecycle actions, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Active group membership is required for group-scoped catalog, purchase, and ledger operations.
+Implemented: group/member management, a seeded fictional offer catalog, purchase-scoped Java–Python optimization recommendations, purchase proposal snapshots and lifecycle actions, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Active group membership is required for group-scoped catalog, purchase, and ledger operations.
 
-Not implemented: production identity/authentication, invitations, offer catalog administration, gift-card application, offer stacking, Java–Python optimizer integration (planned Week 6), or real payment execution. The standalone optimizer is an estimate-only service and does not change a purchase or create a ledger expense. Do not treat the development identity, purchase estimates, or simulated purchase completions as proof of spending. The internal ledger records user-reported expenses and settlements; it does not verify external payments.
+Not implemented: production identity/authentication, invitations, offer catalog administration, gift-card application, offer stacking, or real payment execution. Optimization is estimate-only and does not change a purchase or create a ledger expense. Do not treat the development identity, purchase estimates, or simulated purchase completions as proof of spending. The internal ledger records user-reported expenses and settlements; it does not verify external payments.

@@ -2,7 +2,7 @@
 
 This is a stateless Python service for choosing the lowest estimated cost for one INR purchase using no offer or one discount offer. It uses FastAPI and Pydantic for the HTTP contract, `Decimal` for pricing, integer paise in OR-Tools CP-SAT, and an exhaustive-search baseline to verify solver results.
 
-The service does not connect to PostgreSQL, authenticate users, change Java-owned purchase records, record expenses, or execute payments. Java-to-Python integration is planned for Week 6 and is not implemented here. Java remains authoritative for user authorization and catalog data; this service evaluates only the offer facts supplied in each request.
+The service does not connect to PostgreSQL, authenticate users, change Java-owned purchase records, record expenses, or execute payments. The Java backend calls this service over REST for purchase-scoped recommendations. Java remains authoritative for user authorization, purchase state, catalog data, and eligibility; this service evaluates only the offer facts supplied in each request.
 
 See [the Week 5 optimizer architecture note](../docs/optimizer-architecture.md) for the component flow and service ownership boundary.
 
@@ -39,6 +39,14 @@ The exhaustive baseline evaluates the baseline and each eligible offer in O(n) t
 - Prices are converted to integer paise only after input precision validation. The optimizer does not use binary floating point. Final payable cannot be negative, and savings are defined as `base_amount - final_payable_amount`. The response guarantees `discount_amount == savings_amount` and `final_payable_amount + savings_amount == base_amount`.
 
 The `active`, validity, and offer-term fields in a request are inputs, not proof of authorization or authoritative catalog state. The service independently checks their internal consistency and derives eligibility from them, but it cannot establish whether a caller is allowed to use an offer.
+
+## Java integration
+
+The authenticated Java endpoint is `POST /api/groups/{groupId}/purchases/{purchaseId}/optimization` with an empty request body. Java loads the stored draft purchase and authoritative active catalog entries, filters offers using the existing Java pricing rules, and sends `purchase_amount`, `currency`, `evaluated_at`, and `offers` to the versioned optimizer endpoint below. Monetary values cross this service boundary as decimal strings; timestamps are timezone-aware ISO-8601 strings.
+
+The optimizer returns `status`, `currency`, `base_amount`, `selected_offer_id`, `discount_amount`, `final_payable_amount`, `savings_amount`, `explanation`, `rejected_offers`, and `solver`. Java rejects responses with a non-optimal status, incompatible currency or solver metadata, unexpected rejected candidates, inconsistent amounts, or an offer outside the supplied candidate set. It also compares the selected discount and payable amount with Java's pricing result before returning the recommendation.
+
+The optimization result is not persisted. The purchase remains a draft, and the operation does not create a proposal, approve a purchase, create a ledger expense, or execute a payment. HTTP/network failures and invalid responses are mapped to an explicit `503` by Java; neither service invents a fallback recommendation. Configure the Java service URL and timeouts with `OPTIMIZER_BASE_URL` (default `http://localhost:8000`), `OPTIMIZER_CONNECT_TIMEOUT` (default `1s`), and `OPTIMIZER_READ_TIMEOUT` (default `3s`). See the [root README](../README.md) for the local two-service setup.
 
 ## API
 
@@ -129,4 +137,3 @@ Install runtime dependencies only with `python -m pip install -r requirements.tx
 - The request includes all offer data needed for a stateless decision; there is no database or catalog lookup.
 - Gift cards, stored-value balances, cashback, fees, offer stacking, payment routing, and a global shopping optimizer are out of scope.
 - The output is an estimate only. No purchase, ledger entry, approval, or payment is created.
-- The Java backend does not yet call this service. Week 6 will define and implement that integration.

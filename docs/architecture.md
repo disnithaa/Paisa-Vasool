@@ -74,3 +74,29 @@ The balance sign convention is consistent throughout the service and API:
 For each expense, the payer receives a credit of the full total, while each allocated member receives a debit for their share. For a settlement from sender to recipient, the sender's balance increases and the recipient's balance decreases by the settlement amount. Every ledger calculation starts with all group memberships (including members who later left), applies expense totals, allocations, and settlements, then verifies the group sum is exactly zero. Settlement creation requires an active sender who currently owes and an active recipient currently owed; the amount cannot exceed either current net balance.
 
 Expense and settlement creation take a pessimistic lock on the group row. This serializes changes within one group's ledger so settlement validation observes prior committed writes, rather than racing another ledger write. Balance queries use aggregate projections and batched reads rather than loading JPA relationship graphs.
+
+## Week 6 purchase optimization integration
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant API as PurchaseOptimizationController
+    participant Data as PurchaseOptimizationDataService
+    participant Service as PurchaseOptimizationService
+    participant Client as RestClientOptimizerClient
+    participant Python as FastAPI optimizer
+
+    Caller->>API: POST /api/groups/{groupId}/purchases/{purchaseId}/optimization
+    API->>Service: Optimize purchase
+    Service->>Data: Load authorized draft and eligible offers
+    Data-->>Service: Immutable purchase snapshot (read transaction ends)
+    Service->>Client: POST /api/v1/optimize with decimal strings
+    Client->>Python: REST/JSON request
+    Python-->>Client: OPTIMAL recommendation
+    Client-->>Service: Decoded optimizer response
+    Service->>Service: Validate currency, offer ID, price and savings
+    Service-->>API: Validated recommendation
+    API-->>Caller: Recommendation (no purchase/ledger mutation)
+```
+
+Java owns authentication, group membership, draft-state checks, catalog reads, eligibility, and the final validation of the recommendation. The Python service is stateless and only chooses among the candidates Java supplies. External HTTP work occurs after the short read-only database transaction has ended. The recommendation is not persisted and is not approval or proof of purchase. Connection, HTTP, timeout, and malformed-response failures are surfaced as `503` Problem Details; the backend does not retry the POST or return fallback savings. The backend's optimizer URL and connect/read timeouts are configurable with `OPTIMIZER_BASE_URL`, `OPTIMIZER_CONNECT_TIMEOUT`, and `OPTIMIZER_READ_TIMEOUT`.

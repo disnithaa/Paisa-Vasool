@@ -11,7 +11,7 @@ flowchart LR
     DB -. schema changes .-> Flyway[Flyway migrations]
 ```
 
-The Java backend owns application data and database access. The browser calls the API over REST; it does not connect to PostgreSQL. Flyway applies versioned schema changes when the backend starts, and Hibernate validates the mapped schema without changing it.
+The Java backend owns application data and database access. The browser calls the API over REST; it does not connect to PostgreSQL or call the Python optimizer. Authenticated `GET /api/groups` lists only the current user's active group memberships so the UI can populate its group selector. Flyway applies versioned schema changes when the backend starts, and Hibernate validates the mapped schema without changing it.
 
 ## Group and purchase domain relationships
 

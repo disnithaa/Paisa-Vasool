@@ -10,7 +10,7 @@ The foundation includes a React + TypeScript + Vite frontend, a Java 21 / Spring
 
 - Java 21 (JDK)
 - Maven 3.9+
-- Node.js 20+ and npm 10+
+- Node.js 20.19+ or 22.12+ and npm 10+
 - Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin (Linux)
 - Git
 
@@ -140,6 +140,7 @@ mvn clean test
 
 Group/member endpoints:
 
+- `GET /api/groups` — list groups where the authenticated user has an active membership.
 - `POST /api/groups` with `{"name":"Weekend trip"}` — create a group and owner membership (`201`).
 - `GET /api/groups/{groupId}` — retrieve a group (active members only).
 - `POST /api/groups/{groupId}/members` with `{"name":"Mira","email":"mira@example.com"}` — add or register that member (`201`). The caller must already be an active group member; an existing user account is reused by email.
@@ -245,20 +246,31 @@ Expense and settlement writes are transactional. They serialize on the group row
 
 ## Run the frontend
 
-In a second terminal from the repository root:
+The frontend uses the Java API and the existing development HTTP Basic identity. Start PostgreSQL, the backend, and the optimizer first when using purchase optimization. In a second terminal from the repository root:
 
-```bash
-cd frontend
+```powershell
+Set-Location frontend
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite (normally `http://localhost:5173`). The frontend requests `/api/health`; Vite proxies that request to the backend at `http://localhost:8080`, avoiding local CORS setup for development.
+Open the local URL printed by Vite (normally `http://localhost:5173`), then sign in with the email and password configured by `DEV_AUTH_EMAIL` and `DEV_AUTH_PASSWORD`. Credentials are held in memory for the page session; there is no login or registration API. The default frontend API base is `/api`, which Vite proxies to `http://localhost:8080`. Set `VITE_API_BASE_URL` before starting Vite to point at another Java API base URL (include `/api`).
+
+The UI supports group discovery and creation, member listing and addition, active-offer browsing, draft purchase planning, offer eligibility, purchase optimization, proposal submission and available lifecycle transitions, expense/allocations, backend-provided balances, and simulated settlement history/recording. Catalog administration, user onboarding/production authentication, and a separate reject action are not available in the backend.
 
 Create a production frontend build with:
 
 ```bash
+cd frontend
 npm run build
+```
+
+Run frontend tests and lint:
+
+```bash
+cd frontend
+npm test
+npm run lint
 ```
 
 ## Verify the application journey
@@ -267,8 +279,8 @@ npm run build
 2. Configure the local development identity and start the backend.
 3. Open `http://localhost:8080/api/health`. Confirm the response reports `UP` for both the service and database.
 4. Start the Python optimizer as described above. Use the group and purchase APIs to create a draft, browse offers, and request an optimization recommendation while the purchase is still a draft. The recommendation does not change purchase state. Then submit a proposal, approve it, and record a simulated completion. Separately use the ledger API to record an expense, retrieve balances, and record a simulated settlement.
-5. Start the frontend and open its Vite URL. The frontend currently displays the Week 1 service health screen.
-6. If the database is stopped, the API health endpoint returns HTTP 503; the frontend shows that the database check failed.
+5. Start the frontend and sign in using the configured development identity. Create or select a group, create a draft purchase, request an optimization recommendation, and explicitly submit an eligible offer for approval before using the supported workflow actions.
+6. Open the group's ledger to inspect expenses and backend-calculated balances. Expense allocations must sum exactly to their total; settlement records are simulated and do not execute payments.
 
 ## Backend dependencies
 
@@ -282,6 +294,6 @@ npm run build
 
 ## Current scope
 
-Implemented: group/member management, a seeded fictional offer catalog, purchase-scoped Java–Python optimization recommendations, purchase proposal snapshots and lifecycle actions, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Active group membership is required for group-scoped catalog, purchase, and ledger operations.
+Implemented: React group-scoped workspace, group discovery and member management, a seeded fictional offer catalog, purchase-scoped Java–Python optimization recommendations, purchase proposal snapshots and lifecycle actions, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Active group membership is required for group-scoped catalog, purchase, and ledger operations.
 
 Not implemented: production identity/authentication, invitations, offer catalog administration, gift-card application, offer stacking, or real payment execution. Optimization is estimate-only and does not change a purchase or create a ledger expense. Do not treat the development identity, purchase estimates, or simulated purchase completions as proof of spending. The internal ledger records user-reported expenses and settlements; it does not verify external payments.

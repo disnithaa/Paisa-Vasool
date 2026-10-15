@@ -30,6 +30,11 @@ public class GroupController {
         this.groupService = groupService;
     }
 
+    @GetMapping
+    public List<GroupResponse> listGroups() {
+        return groupService.listGroups();
+    }
+
     @PostMapping
     public ResponseEntity<GroupResponse> createGroup(@Valid @RequestBody CreateGroupRequest request) {
         GroupResponse response = groupService.createGroup(request.name());

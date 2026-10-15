@@ -54,6 +54,18 @@ public class GroupService {
         return toResponse(group);
     }
 
+    @Transactional(readOnly = true)
+    public List<GroupResponse> listGroups() {
+        User currentUser = currentUserService.requireCurrentUser();
+        return membershipRepository.findAllByUser_IdAndStatusOrderByJoinedAtAsc(
+                currentUser.getId(),
+                MembershipStatus.ACTIVE
+            )
+            .stream()
+            .map(membership -> toResponse(membership.getGroup()))
+            .toList();
+    }
+
     @Transactional
     public MemberResponse addMember(UUID groupId, AddMemberRequest request) {
         Group group = findGroup(groupId);

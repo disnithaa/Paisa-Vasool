@@ -19,6 +19,12 @@ public interface GroupMembershipRepository extends JpaRepository<GroupMembership
     @EntityGraph(attributePaths = "user")
     List<GroupMembership> findAllByGroup_IdOrderByJoinedAtAsc(UUID groupId);
 
+    @EntityGraph(attributePaths = "group")
+    List<GroupMembership> findAllByUser_IdAndStatusOrderByJoinedAtAsc(
+        UUID userId,
+        MembershipStatus status
+    );
+
     @EntityGraph(attributePaths = "user")
     List<GroupMembership> findAllByIdInAndGroup_Id(Collection<UUID> ids, UUID groupId);
 }

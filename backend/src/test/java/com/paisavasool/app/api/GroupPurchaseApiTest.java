@@ -115,6 +115,37 @@ class GroupPurchaseApiTest {
     }
 
     @Test
+    void groupListContainsOnlyGroupsWithCurrentUsersActiveMembership() throws Exception {
+        String activeGroupId = createGroup("Active group");
+
+        User otherUser = userRepository.saveAndFlush(new User("Other", "other@example.com"));
+        Group otherGroup = groupRepository.saveAndFlush(new Group("Other user's group"));
+        membershipRepository.saveAndFlush(new GroupMembership(
+            otherUser, otherGroup, MembershipRole.OWNER, MembershipStatus.ACTIVE
+        ));
+
+        Group leftGroup = groupRepository.saveAndFlush(new Group("Former membership"));
+        User currentUser = userRepository.findByEmail(DEV_EMAIL).orElseThrow();
+        GroupMembership formerMembership = membershipRepository.saveAndFlush(new GroupMembership(
+            currentUser, leftGroup, MembershipRole.MEMBER, MembershipStatus.ACTIVE
+        ));
+        formerMembership.leave();
+        membershipRepository.flush();
+
+        mockMvc.perform(get("/api/groups").with(httpBasic(DEV_EMAIL, "test-secret")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].id").value(activeGroupId))
+            .andExpect(jsonPath("$[0].name").value("Active group"));
+    }
+
+    @Test
+    void groupListRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/groups"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void groupCreationRejectsInvalidName() throws Exception {
         mockMvc.perform(post("/api/groups")
                 .with(httpBasic(DEV_EMAIL, "test-secret"))

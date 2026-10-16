@@ -297,3 +297,54 @@ npm run lint
 Implemented: React group-scoped workspace, group discovery and member management, a seeded fictional offer catalog, purchase-scoped Java–Python optimization recommendations, purchase proposal snapshots and lifecycle actions, expense and allocation recording, derived zero-sum balances, and simulated settlement recording/history. Group owners are represented by memberships. Active group membership is required for group-scoped catalog, purchase, and ledger operations.
 
 Not implemented: production identity/authentication, invitations, offer catalog administration, gift-card application, offer stacking, or real payment execution. Optimization is estimate-only and does not change a purchase or create a ledger expense. Do not treat the development identity, purchase estimates, or simulated purchase completions as proof of spending. The internal ledger records user-reported expenses and settlements; it does not verify external payments.
+
+## Start the complete local stack
+
+The Compose stack runs PostgreSQL, the Python optimizer, the Java API, and the built React frontend. The frontend is available at `http://localhost:5173`; the API is also available directly at `http://localhost:8080`. The optimizer stays on the private Compose network and is called only by Java.
+
+Copy `.env.example` to `.env`, replace both placeholder passwords with local-only values, then build and start the stack from the repository root:
+
+```powershell
+Copy-Item .env.example .env
+docker compose --env-file .env -f infra\docker-compose.yml up -d --build
+docker compose --env-file .env -f infra\docker-compose.yml ps
+```
+
+The backend waits for healthy PostgreSQL and optimizer services. Flyway applies database migrations on backend startup, and the backend health check verifies its database connection before the frontend starts. Sign in to the frontend with the `DEV_AUTH_EMAIL` and `DEV_AUTH_PASSWORD` values from `.env`. This development identity is local-only and is not safe for public deployment.
+
+To stop the stack without deleting database data:
+
+```powershell
+docker compose --env-file .env -f infra\docker-compose.yml down
+```
+
+The PostgreSQL named volume is intentionally preserved by that command. Do not use `down -v` unless you explicitly intend to permanently erase the local database.
+
+## Quality checks and CI
+
+The GitHub Actions workflow runs frontend tests, lint, and production build; Java verification on Java 21, including a PostgreSQL Testcontainers migration/schema test; and the Python optimizer test suite. The backend PostgreSQL integration test is skipped by Testcontainers only when Docker is unavailable; CI runners provide Docker.
+
+Run the checks locally:
+
+```powershell
+cd frontend
+npm ci
+npm test
+npm run lint
+npm run build
+cd ..\backend
+mvn -B -ntp verify
+cd ..\optimizer
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+The Java build targets Java 21. The PostgreSQL integration test requires a working Docker daemon and may need to download its Testcontainers image on first run. Python dependency ranges are constrained in `optimizer\requirements.txt`; the project does not currently maintain a platform-specific lockfile.
+
+## Stage 8 deployment and remaining limitations
+
+Deployment is intentionally **not performed or configured for a public host**. The current authentication mechanism is a single development-only HTTP Basic identity, so public exposure would be unsafe. Production authentication and its authorization model must be designed before selecting a public deployment target. No paid resources or public endpoints have been created.
+
+Other current limitations include no server-side idempotency key for expense or settlement writes, no production identity provider, no offer administration or gift-card application, and no end-to-end browser test against a live stack. The optimizer recommendation is not a purchase approval or ledger entry. Approved purchase completion remains simulated; only a separate expense write changes ledger balances, and settlements are simulated records rather than money transfers.
+
+For a reproducible walkthrough and code-based interview preparation, see [the Stage 8 demo and placement guide](./docs/stage-8-handover.md). See [the architecture guide](./docs/architecture.md) for service responsibilities and communication paths.

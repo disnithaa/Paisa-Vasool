@@ -2,16 +2,25 @@
 
 ```mermaid
 flowchart LR
-    Browser[React + TypeScript frontend\nVite on :5173] -->|/api requests| Proxy[Vite development proxy]
-    Proxy -->|HTTP :8080| Security[Spring Security\nlocal Basic identity]
+    Browser[Browser] --> Frontend[React + TypeScript\nVite :5173 / Nginx :5173]
+    Frontend -->|/api over HTTP| Security[Spring Security\nlocal Basic identity]
     Security --> API[REST controllers and DTOs]
     API --> Services[Group and purchase services\ntransactions and business rules]
     Services[Group, purchase, expense, balance, and settlement services] --> Repositories[Spring Data JPA repositories]
     Repositories --> DB[(PostgreSQL :5432\napp schema)]
     DB -. schema changes .-> Flyway[Flyway migrations]
+    Services -->|purchase recommendation request| Optimizer[FastAPI / OR-Tools :8000]
 ```
 
-The Java backend owns application data and database access. The browser calls the API over REST; it does not connect to PostgreSQL or call the Python optimizer. Authenticated `GET /api/groups` lists only the current user's active group memberships so the UI can populate its group selector. Flyway applies versioned schema changes when the backend starts, and Hibernate validates the mapped schema without changing it.
+The Java backend owns application data and database access. The browser calls Java over REST; it does not connect to PostgreSQL or call the Python optimizer. During development, Vite proxies `/api` to Java; in the container stack, Nginx serves the built frontend and proxies `/api` to Java on the private Compose network. Authenticated `GET /api/groups` lists only the current user's active group memberships so the UI can populate its group selector. Flyway applies versioned schema changes when the backend starts, and Hibernate validates the mapped schema without changing it.
+
+## Local containers, CI, and deployment boundary
+
+`infra/docker-compose.yml` defines PostgreSQL, the stateless optimizer, Java backend, and frontend. PostgreSQL and optimizer health checks gate backend startup; backend health gates frontend startup. The database uses a named volume that survives ordinary Compose shutdown. Backend migrations remain owned by Flyway at application startup. The optimizer has no published host port and is reachable from Java only.
+
+The `CI` GitHub Actions workflow independently checks the frontend, Java backend, and optimizer on pushes and pull requests to `main`. Java verification targets Java 21 and includes a PostgreSQL Testcontainers test that exercises Flyway migrations, JPA schema validation, seeded catalog rows, and the database's declared monetary precision.
+
+There is no public deployment configuration. The only configured identity is development-only HTTP Basic, so a public deployment is blocked until production authentication and authorization are designed and reviewed. No cloud services or paid resources are provisioned by this project.
 
 ## Group and purchase domain relationships
 

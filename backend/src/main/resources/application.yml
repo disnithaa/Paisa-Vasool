@@ -39,9 +39,7 @@ app:
     name: ${DEV_AUTH_NAME:Local Developer}
     password: ${DEV_AUTH_PASSWORD:dev-only-change-me}
   cors:
-    allowed-origins:
-      - http://localhost:5173
-      - http://127.0.0.1:5173
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   optimizer:
     base-url: ${OPTIMIZER_BASE_URL:http://localhost:8000}
     connect-timeout: ${OPTIMIZER_CONNECT_TIMEOUT:1s}
